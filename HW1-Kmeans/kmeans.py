@@ -1,14 +1,11 @@
+# For students:
 import cv2
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.ndimage.filters import gaussian_laplace, sobel
-from sklearn import cluster
-from sklearn.cluster import KMeans
 
 
-def js5957_JunshengShi_kmeans(imgPath, imgFilename,
-                              savedImgPath, savedImgFilename, k):
+def mykmeans(imgPath, imgFilename, savedImgPath, savedImgFilename, k):
     """
             parameters:
             imgPath: the path of the image folder. Please use relative path
@@ -19,82 +16,99 @@ def js5957_JunshengShi_kmeans(imgPath, imgFilename,
             function: using k-means to segment the image and save the result to an image with a bounding box
     """
     # load the image data into memory, for future use we will load the image in all common formats
-    img_org, img_rgb, img_gray, img_binary = reader(imgPath, imgFilename)
+    org, rgb, gray, binary = reader(imgPath, imgFilename)
 
-    # convert RGB to HSV in order to equalize the histogram to enhance brightness contrast
-    hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-    hsv[:, :, 2] = cv2.equalizeHist(hsv[:, :, 2])
-
-    # split HSV into separate channels
-    chans = cv2.split(hsv)
-    # use the second channel to filter out the bright background first
-    chan = np.copy(chans[1])
-    hsv[chan <= 15] = 0
-    # equalize the image again to enhance the contrast among colors without background
-    hsv[:, :, 2] = cv2.equalizeHist(hsv[:, :, 2])
-    # convert back to RGB format and we will process in RGB
-    img_rgb_ = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-
-    # split the RGB channels
-    R, G, _ = cv2.split(img_rgb_)
-    # create a color mask which helps identify the difference between face color and light shirt color
-    _mask = (R-G) < 25
-    img_rgb_[_mask] = 0
-
-    # filter out the noise left after preprocessing so far
-    img_rgb_ = cv2.medianBlur(img_rgb_, ksize=7)
-
-    # create a new pixel matrix with the same width and height as the original image
-    # except that we add two more features in addition to RGB channels
-    # thus, the fourth feature is the x's coordinate and fifth is the y's coordinate of each pixel
-    shapes = img_rgb_.shape
-    pix_ = np.zeros((shapes[0], shapes[1], 5))
-    # loop through each pixel and add x, y coordinate behind RGB values
-    # this step improve Kmean algorithm by not only clustering on the color
-    # but also putting pixels into correct classes based on their location
-    # this helps remedy the error of clustering faces and hands together
-    # due to very similar RBG values
-    for i in range(shapes[0]):
-        for j in range(shapes[1]):
-            pix_[i, j] = np.concatenate((img_rgb_[i, j], [i, j]), axis=None)
-    pix_ = pix_.reshape((-1, 5))
-
-    # run Kmean algorithm with color features RGB and coordinates x,y
-    kmean_ = KMeans(n_clusters=k, random_state=0).fit(pix_)
-    labels = kmean_.labels_
-    centers = kmean_.cluster_centers_
+    # run prepacked KMean method with specified K number of clusters
+    labels, centers = kmeans(rgb, k)
 
     # use the colorCenter method to find the list of centers that can represent the color of face
     cluster_ = colorCenter(centers)
 
     # use the mask method to filter out any irrelevant color clusters
-    _, binary, _ = mask(img_rgb_, cluster_, labels)
+    _, binaryOut, _ = mask(
+        rgb, clusters=cluster_, labels=labels)
+
+    # apply median filtering algorithm and ksize to be 13 (empirical outcome)
+    # this step is intended to remove insignificant white dots (salt-pepper problem)
+    binary_ = cv2.medianBlur(binaryOut, ksize=13)
 
     # as required in the instruction, this is just to showcase the intermediate outcome in binary
-    plt.imshow(binary, cmap='gray')
+    plt.imshow(binary_, cmap='gray')
     plt.show()
 
     # find the contour of the face in the preprocessed binary image
-    contours, _ = cv2.findContours(
-        binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(
+        binary_, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # Draw all the contours
-    cv2.drawContours(binary, contours, -1, (255, 0, 0), 1)
+    img = cv2.drawContours(binary_, contours, -1, (255, 0, 0), 1)
 
     # Iterate through all the contours
     for contour in contours:
         # Find bounding rectangles
         x, y, w, h = cv2.boundingRect(contour)
         # Draw the rectangle
-        if cv2.contourArea(contour) > 200:
-            img_rgb = cv2.rectangle(
-                img_rgb, (x, y), (x+w, y+h), (255, 0, 0), 2)
+        rgb = cv2.rectangle(rgb, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
     # save the outcome image into the specified file
-    writer(img_rgb, savedImgPath, savedImgFilename)
-    # present the outcome image with red rectangles around the figures' faces
-    plt.imshow(img_rgb)
+    writer(rgb, savedImgPath, savedImgFilename)
+    # present the outcome image with a red rectangle around the figure's face
+    plt.imshow(rgb)
     plt.show()
+
+
+def colorCenter(centers):
+    """this method helps find the ideal color clusters that can represent face
+
+    Args:
+        centers (array): a list of RGB values
+
+    Returns:
+        list: a list of ideal clusters that may contain face
+    """
+    # format the centers array into a list of RGB colortuples
+    centers = np.uint8(centers)
+    colors = [tuple(x) for x in centers]
+    # define a color range that can represent the face color with lower bound in the first tuple and upper bound in the second
+    color_range = [(210, 160, 140), (220, 170, 150)]
+    # loop through each color tuple in the tuples list and if the color is within the color range, then return the cluster index
+    clusters = []
+    for i, color in enumerate(colors):
+        if color >= color_range[0] and color <= color_range[1]:
+            clusters.append(i)
+    return clusters
+
+
+def kmeans(data, k, kind="rgb"):
+    """wrap up the Kmean algorithm for RGB or Gray image
+
+    Args:
+        data (array): image matrix/array which we will treat as X input for Kmean
+        k (int): the number of clusters we'd like to run the Kmean on
+        kind (str, optional): specify the type of image data we input. Defaults to "rgb".
+
+    Returns:
+        arrays: labels is the array denoted by the k clusters and centers is 
+                the array containing k color centers
+    """
+    # preprocess the input data based on the type of image data they are
+    # the difference is that grayscale data only have one color channel,
+    # whereas RGB have three
+    if kind == "gray":
+        pixel_values = data.reshape((1, data.shape[0]*data.shape[1]))
+        pixel_values = np.float32(pixel_values)
+    else:
+        pixel_values = data.reshape((-1, 3))
+        pixel_values = np.float32(pixel_values)
+    # specify the parameters required by cv2.kmeans method
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+    flags = cv2.KMEANS_RANDOM_CENTERS
+    # run kmeans on the preprocessed data and collect the outcomes and return
+    compactness, labels, (centers) = cv2.kmeans(
+        pixel_values, k, None, criteria=criteria,
+        attempts=10, flags=flags
+    )
+    return labels, centers
 
 
 def mask(img, clusters, labels):
@@ -168,33 +182,11 @@ def reader(imgPath, imgFilename):
     return img_org, img_rgb, img_gray, img_binary
 
 
-def colorCenter(centers):
-    """this method helps find the ideal color clusters that can represent face
-
-    Args:
-        centers (array): a list of RGB values
-
-    Returns:
-        list: a list of ideal clusters that may contain face
-    """
-    # format the centers array into a list of RGB colortuples
-    centers = np.uint8(centers)
-    colors = [tuple(x) for x in centers]
-    # define a color range that can represent the face color with lower bound in the first tuple and upper bound in the second
-    color_range = [(220, 150, 180), (250, 250, 255)]
-    # loop through each color tuple in the tuples list and if the color is within the color range, then return the cluster index
-    clusters = []
-    for i, color in enumerate(colors):
-        if color >= color_range[0] and color <= color_range[1]:
-            clusters.append(i)
-    return clusters
-
-
 if __name__ == "__main__":
     imgPath = "./"  # Write your own path
-    imgFilename = "faces.jpg"
+    imgFilename = "face_d2.jpg"
     savedImgPath = r''  # Write your own path
-    savedImgFilename = "faces_extra_credit.jpg"
-    k = 40
-    js5957_JunshengShi_kmeans(imgPath, imgFilename,
+    savedImgFilename = "face_d2_face.jpg"
+    k = 7
+    mykmeans(imgPath, imgFilename,
                               savedImgPath, savedImgFilename, k)
