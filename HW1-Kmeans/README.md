@@ -4,16 +4,16 @@ Key parameters are also discussed in the scripts. Please review the summary with
 
 
 
-Discussion and Improvement
+## Discussion and Improvement
 
--kmeans.py 
+- kmeans.py 
 This script has been written in a way that the algorithm can automatically identify the face cluster and separate it from the irrelevant classes.
 However, the script can be further improve by using sys.argv to allow the user to specify certain key parameters in command line.
 In addition, regarding the algorithm itself, it was pre-determined to use k=7 clusters while running KMeans. 
 In the future, we may want to let the algorithm decide the optimal k value and tweak the some other hyperparameters independently.
 
 
--ExtraCredit.py
+- ExtraCredit.py
 This script has overall involved more complex thoughts in its design. 
 In preprocessing the image, the script pre-specified some values or rules, which could only be obtained empricially and mannually.
 This process involved much more trials and errors and might be implemented automatically.
